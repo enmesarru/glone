@@ -1,0 +1,7 @@
+providers:
+  - name: name
+    url: url
+    auth:
+      type: token
+      username: _ENV_USERNAME
+      password: _ENV_PASS
