@@ -2,17 +2,20 @@ providers:
   - name: name
     url: url
     sync_dir: "/home/username/repositories/repository_name"
+    branch: master
     auth:
       type: token
       username: _ENV_USERNAME
       password: _ENV_PASS
   - name: name
     url: url
+    branch: master
     sync_dir: "/home/username/repositories/repository_name"
     auth:
       type: public
   - name: name
     url: url
+    branch: master
     sync_dir: "/home/username/repositories/repository_name"
     auth:
       type: ssh
