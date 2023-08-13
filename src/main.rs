@@ -2,6 +2,17 @@ fn main() {
     let mut glone_options = app::GloneOptions::new();
     logger::init_logger(&glone_options.log_path);
     glone_options.load();
+
+    match glone_options.config {
+        Some(config) => {
+            for provider in config.get_providers().iter() {
+                log::info!("Starting the cloning for {}", provider.url);
+
+                git::clone(provider)
+            }
+        }
+        None => todo!(),
+    }
 }
 
 pub mod app {
@@ -15,7 +26,7 @@ pub mod app {
         config_dir_path: PathBuf,
         config_path: PathBuf,
         pub log_path: PathBuf,
-        config: Option<Config>,
+        pub config: Option<Config>,
     }
 
     impl GloneOptions {
@@ -98,6 +109,8 @@ pub mod app {
 }
 
 pub mod config {
+    use std::env;
+
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Serialize, Deserialize)]
@@ -105,26 +118,55 @@ pub mod config {
         providers: Vec<Provider>,
     }
 
+    impl Config {
+        pub fn get_providers(&self) -> &Vec<Provider> {
+            self.providers.as_ref()
+        }
+    }
+
     #[derive(Debug, Serialize, Deserialize)]
     pub struct Provider {
-        name: String,
-        url: String,
-        auth: Auth,
+        pub name: String,
+        pub url: String,
+        pub sync_dir: String,
+        pub auth: Auth,
     }
 
     #[derive(Debug, Serialize, Deserialize)]
     pub struct Auth {
-        r#type: AuthType,
-        username: Option<String>,
-        password: Option<String>,
+        pub r#type: AuthType,
+        pub username: Option<String>,
+        pub password: Option<String>,
+        pub path: Option<String>,
+    }
+
+    impl Auth {
+        pub fn is_valid_cred(&self) -> bool {
+            self.username.as_ref().unwrap().starts_with('_')
+                && self.password.as_ref().unwrap().starts_with('_')
+        }
+
+        pub fn get_username(&self) -> String {
+            env::var(self.username.as_ref().unwrap()).unwrap()
+        }
+
+        pub fn get_password(&self) -> String {
+            env::var(self.password.as_ref().unwrap()).unwrap()
+        }
+
+        pub fn get_ssh_path(&self) -> &String {
+            self.password.as_ref().unwrap()
+        }
     }
 
     #[derive(Debug, Serialize, Deserialize)]
-    enum AuthType {
+    pub enum AuthType {
         #[serde(rename = "token")]
         Token,
         #[serde(rename = "ssh")]
         Ssh,
+        #[serde(rename = "public")]
+        Public,
     }
 }
 
@@ -162,5 +204,52 @@ pub mod logger {
         log4rs::init_config(config).unwrap();
 
         log::info!("Logger initialized");
+    }
+}
+
+pub mod git {
+    use std::path::Path;
+
+    use git2::{Cred, RemoteCallbacks};
+
+    use crate::config::{AuthType, Provider};
+
+    pub fn clone(provider: &Provider) {
+        let mut callbacks = RemoteCallbacks::new();
+
+        match provider.auth.r#type {
+            AuthType::Token => {
+                if provider.auth.is_valid_cred() {
+                    callbacks.credentials(|_url, _username_from_url, _allowed_types| {
+                        Cred::userpass_plaintext(
+                            &provider.auth.get_username(),
+                            &provider.auth.get_password(),
+                        )
+                    });
+                }
+            }
+            AuthType::Ssh => {
+                callbacks.credentials(|_url, username_from_url, _allowed_types| {
+                    Cred::ssh_key(
+                        username_from_url.unwrap(),
+                        None,
+                        Path::new(provider.auth.get_ssh_path()),
+                        None,
+                    )
+                });
+            }
+            AuthType::Public => {}
+        }
+
+        // Prepare fetch options.
+        let mut fo = git2::FetchOptions::new();
+        fo.remote_callbacks(callbacks);
+
+        // Prepare builder.
+        let mut builder = git2::build::RepoBuilder::new();
+        builder.fetch_options(fo);
+
+        // Clone the project.
+        let _ = builder.clone(&provider.url, Path::new(&provider.sync_dir));
     }
 }

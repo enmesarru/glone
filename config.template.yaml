@@ -1,7 +1,20 @@
 providers:
   - name: name
     url: url
+    sync_dir: "/home/username/repositories/repository_name"
     auth:
       type: token
       username: _ENV_USERNAME
       password: _ENV_PASS
+  - name: name
+    url: url
+    sync_dir: "/home/username/repositories/repository_name"
+    auth:
+      type: public
+  - name: name
+    url: url
+    sync_dir: "/home/username/repositories/repository_name"
+    auth:
+      type: ssh
+      username: _ENV_USERNAME
+      path: "/.ssh/id_rsa"
