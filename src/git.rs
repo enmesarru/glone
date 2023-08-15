@@ -1,20 +1,21 @@
-use std::{io::Write, path::Path};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use std::path::Path;
 
 use git2::{Cred, RemoteCallbacks, Repository};
 
 use crate::config::{AuthType, Provider};
 
-pub fn download(provider: &Provider) {
+pub fn download(provider: &Provider, m: &MultiProgress) {
     let repo_path = Path::new(&provider.sync_dir);
 
     if repo_path.exists() && repo_path.is_dir() {
-        pull(provider, repo_path);
+        pull(provider, repo_path, &m);
     } else {
-        clone(provider, repo_path);
+        clone(provider, repo_path, &m);
     }
 }
 
-fn pull(provider: &Provider, repo_path: &Path) {
+fn pull(provider: &Provider, repo_path: &Path, m: &MultiProgress) {
     let repo = match Repository::open(repo_path) {
         Ok(repo) => repo,
         Err(e) => {
@@ -24,13 +25,24 @@ fn pull(provider: &Provider, repo_path: &Path) {
     };
 
     let mut remote = repo.find_remote("origin").unwrap();
-    let fetch_commit = fetch(&repo, &[&provider.branch], &mut remote).unwrap();
+    let fetch_commit = fetch(&repo, &[&provider.branch], &mut remote, &m).unwrap();
 
     let _ = merge(&repo, &provider.branch, fetch_commit);
 }
 
-fn clone(provider: &Provider, repo_path: &Path) {
+fn clone(provider: &Provider, repo_path: &Path, m: &MultiProgress) {
     let mut callbacks = RemoteCallbacks::new();
+
+    let sty = ProgressStyle::with_template(
+        "[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}",
+    )
+    .unwrap()
+    .progress_chars("##-");
+
+    let n = 100;
+    let pb = m.add(ProgressBar::new(n));
+    pb.set_style(sty.clone());
+    pb.set_message(format!("{}", &provider.name));
 
     match provider.auth.r#type {
         AuthType::Token => {
@@ -56,6 +68,20 @@ fn clone(provider: &Provider, repo_path: &Path) {
         AuthType::Public => {}
     }
 
+    callbacks.transfer_progress(move |stats| {
+        let total = stats.total_objects().try_into().unwrap();
+        let received: u64 = stats.received_objects().try_into().unwrap();
+        pb.set_length(total);
+
+        if received == total {
+            pb.finish_with_message("finished");
+        } else {
+            pb.inc(1);
+        }
+
+        true
+    });
+
     // Prepare fetch options.
     let mut fo = git2::FetchOptions::new();
     fo.remote_callbacks(callbacks);
@@ -74,27 +100,33 @@ fn fetch<'a>(
     repo: &'a git2::Repository,
     refs: &[&str],
     remote: &'a mut git2::Remote,
+    m: &MultiProgress,
 ) -> Result<git2::AnnotatedCommit<'a>, git2::Error> {
     let mut cb = git2::RemoteCallbacks::new();
 
+    let sty = ProgressStyle::with_template(
+        "[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}",
+    )
+    .unwrap()
+    .progress_chars("##-");
+
+    let n = 100;
+    let pb = m.add(ProgressBar::new(n));
+    pb.set_style(sty.clone());
+    pb.set_message(format!("{}", &remote.name().unwrap()));
+
     // Print out our transfer progress.
-    cb.transfer_progress(|stats| {
-        if stats.received_objects() == stats.total_objects() {
-            print!(
-                "Resolving deltas {}/{}\r",
-                stats.indexed_deltas(),
-                stats.total_deltas()
-            );
-        } else if stats.total_objects() > 0 {
-            print!(
-                "Received {}/{} objects ({}) in {} bytes\r",
-                stats.received_objects(),
-                stats.total_objects(),
-                stats.indexed_objects(),
-                stats.received_bytes()
-            );
+    cb.transfer_progress(move |stats| {
+        let total = stats.total_objects().try_into().unwrap();
+        let received: u64 = stats.received_objects().try_into().unwrap();
+        pb.set_length(total);
+
+        if received == total {
+            pb.finish_with_message("finished");
+        } else {
+            pb.inc(1);
         }
-        std::io::stdout().flush().unwrap();
+
         true
     });
 
@@ -104,25 +136,6 @@ fn fetch<'a>(
     fo.download_tags(git2::AutotagOption::All);
     log::info!("Fetching {} for repo", remote.name().unwrap());
     remote.fetch(refs, Some(&mut fo), None)?;
-
-    let stats = remote.stats();
-    if stats.local_objects() > 0 {
-        log::info!(
-            "\rReceived {}/{} objects in {} bytes (used {} local \
-                 objects)",
-            stats.indexed_objects(),
-            stats.total_objects(),
-            stats.received_bytes(),
-            stats.local_objects()
-        );
-    } else {
-        log::info!(
-            "\rReceived {}/{} objects in {} bytes",
-            stats.indexed_objects(),
-            stats.total_objects(),
-            stats.received_bytes()
-        );
-    }
 
     let fetch_head = repo.find_reference("FETCH_HEAD")?;
     Ok(repo.reference_to_annotated_commit(&fetch_head)?)
