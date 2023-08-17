@@ -25,25 +25,13 @@ fn pull(provider: &Provider, repo_path: &Path, m: &MultiProgress) {
     };
 
     let mut remote = repo.find_remote("origin").unwrap();
-    let fetch_commit = fetch(&repo, &[&provider.branch], &mut remote, &m).unwrap();
+    let fetch_commit = fetch(&repo, &[&provider.branch], &mut remote, &m, provider).unwrap();
 
     let _ = merge(&repo, &provider.branch, fetch_commit);
 }
 
-fn clone(provider: &Provider, repo_path: &Path, m: &MultiProgress) {
+fn create_callbacks(provider: &Provider) -> RemoteCallbacks<'_> {
     let mut callbacks = RemoteCallbacks::new();
-
-    let sty = ProgressStyle::with_template(
-        "[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}",
-    )
-    .unwrap()
-    .progress_chars("##-");
-
-    let n = 100;
-    let pb = m.add(ProgressBar::new(n));
-    pb.set_style(sty.clone());
-    pb.set_message(format!("{}", &provider.name));
-
     match provider.auth.r#type {
         AuthType::Token => {
             if provider.auth.is_valid_cred() {
@@ -67,6 +55,23 @@ fn clone(provider: &Provider, repo_path: &Path, m: &MultiProgress) {
         }
         AuthType::Public => {}
     }
+
+    return callbacks;
+}
+
+fn clone(provider: &Provider, repo_path: &Path, m: &MultiProgress) {
+    let mut callbacks = create_callbacks(provider);
+
+    let sty = ProgressStyle::with_template(
+        "[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}",
+    )
+    .unwrap()
+    .progress_chars("##-");
+
+    let n = 100;
+    let pb = m.add(ProgressBar::new(n));
+    pb.set_style(sty.clone());
+    pb.set_message(format!("{}", &provider.name));
 
     callbacks.transfer_progress(move |stats| {
         let total = stats.total_objects().try_into().unwrap();
@@ -101,8 +106,9 @@ fn fetch<'a>(
     refs: &[&str],
     remote: &'a mut git2::Remote,
     m: &MultiProgress,
+    provider: &Provider,
 ) -> Result<git2::AnnotatedCommit<'a>, git2::Error> {
-    let mut cb = git2::RemoteCallbacks::new();
+    let mut cb = create_callbacks(provider);
 
     let sty = ProgressStyle::with_template(
         "[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}",
