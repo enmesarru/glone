@@ -96,6 +96,11 @@ impl GloneOptions {
     }
 
     fn create_config_dir(&self) {
+        log::info!(
+            "Your config should be located at: {}",
+            self.config_dir_path.to_string_lossy()
+        );
+
         if !self.config_dir_path.exists() {
             match std::fs::create_dir_all(&self.config_dir_path) {
                 Ok(_) => {
