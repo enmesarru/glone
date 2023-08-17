@@ -56,7 +56,7 @@ impl Auth {
     }
 
     pub fn get_ssh_path(&self) -> &String {
-        self.password.as_ref().unwrap()
+        self.path.as_ref().unwrap()
     }
 }
 
