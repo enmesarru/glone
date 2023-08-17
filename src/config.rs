@@ -7,7 +7,7 @@ use dirs::config_dir;
 use serde::{Deserialize, Serialize};
 
 pub struct GloneOptions {
-    config_dir_path: PathBuf,
+    pub config_dir_path: PathBuf,
     config_path: PathBuf,
     pub log_path: PathBuf,
     pub config: Option<Config>,
